@@ -1,0 +1,95 @@
+import requests
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Alignment
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+from datetime import datetime
+
+# === KONFIGURASI ===
+NAGIOS_URL = "http://nagios-url/nagios/cgi-bin/statusjson.cgi"
+USERNAME = "username" #username
+PASSWORD = "password" #password
+OUTPUT_XLSX = f"Laporan Nagios Tanggal {datetime.now().date()}.xlsx"
+OUTPUT_PDF = f"Laporan Nagios Tanggal {datetime.now().date()}.pdf"
+
+# Daftar host dan service
+target_hosts = [
+    "Edit With Ur Host"
+]
+target_services = ["Edit With Ur Service"]
+
+# Ambil data dari Nagios dan simpan ke dict
+host_dict = {}
+
+for host in target_hosts:
+    print(f"🔄 Ambil data untuk host: {host}")
+    outputs = []
+    for svc in target_services:
+        params = {
+            "query": "service",
+            "hostname": host,
+            "servicedescription": svc
+        }
+        try:
+            response = requests.get(NAGIOS_URL, params=params, auth=(USERNAME, PASSWORD), timeout=10)
+            if response.status_code == 200:
+                data = response.json().get("data", {}).get("service", {})
+                plugin_output = data.get("plugin_output", "N/A")
+            else:
+                plugin_output = "N/A"
+        except Exception as e:
+            plugin_output = f"ERROR: {e}"
+        outputs.append(plugin_output)
+    host_dict[host] = outputs
+
+# === SIMPAN EXCEL HORIZONTAL ===
+wb = Workbook()
+ws = wb.active
+ws.title = "Nagios Horizontal"
+
+# Header baris 1: merge nama host
+col = 1
+for host in target_hosts:
+    ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col+3)
+    ws.cell(row=1, column=col, value=host)
+    ws.cell(row=1, column=col).alignment = Alignment(horizontal="center")
+    col += 4
+
+# Header baris 2: nama layanan
+col = 1
+for _ in target_hosts:
+    for svc in target_services:
+        ws.cell(row=2, column=col, value=svc)
+        ws.cell(row=2, column=col).alignment = Alignment(horizontal="center")
+        col += 1
+
+# Baris 3: hasil data
+col = 1
+for host in target_hosts:
+    for output in host_dict[host]:
+        ws.cell(row=3, column=col, value=output)
+        col += 1
+
+# Atur lebar kolom
+for i in range(1, ws.max_column + 1):
+    ws.column_dimensions[get_column_letter(i)].width = 40
+
+wb.save(OUTPUT_XLSX)
+print(f"✅ File Excel disimpan ke: {OUTPUT_XLSX}")
+
+# === SIMPAN PDF ===
+df = pd.DataFrame.from_dict(host_dict, orient='index', columns=target_services)
+fig, ax = plt.subplots(figsize=(14, 2 + 0.4 * len(df)))
+ax.axis('off')
+table = ax.table(cellText=df.values, colLabels=df.columns, rowLabels=df.index, loc='center')
+table.auto_set_font_size(False)
+table.set_fontsize(9)
+table.scale(1.2, 1.2)
+
+with PdfPages(OUTPUT_PDF) as pdf:
+    pdf.savefig(fig, bbox_inches='tight')
+    plt.close()
+
+print(f"✅ File PDF disimpan ke: {OUTPUT_PDF}")
